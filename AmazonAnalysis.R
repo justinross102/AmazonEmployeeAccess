@@ -88,8 +88,13 @@ penalized_logistic_mod <- logistic_reg(mixture = tune(),
                                        penalty = tune()) %>% #Type of model
   set_engine("glmnet")
 
+target_encoding_recipe <- recipe(ACTION ~ ., train) %>%
+  step_mutate_at(all_numeric_predictors(), fn = factor) %>% # turn all numeric features into factors
+  step_other(all_nominal_predictors(), threshold = .001) %>%  # combines categorical values that occur <1% into an "other" value
+  step_lencode_mixed(all_nominal_predictors(), outcome = vars(ACTION)) # target encoding (must be 2-factor)
+
 penalized_logistic_workflow <- workflow() %>%
-  add_recipe(my_recipe) %>%
+  add_recipe(target_encoding_recipe) %>%
   add_model(penalized_logistic_mod)
 
 ## Grid of values to tune over
@@ -127,8 +132,8 @@ pen_log_submission <- penalized_logistic_predictions %>%
 
 # write to csv
 vroom_write(x=pen_log_submission, file="./penalized_logistic_predictions.csv", delim=",")
-# private - 0.70442
-# public - 0.69667
+# private - 0.79076
+# public - 0.7832
 
 
 
