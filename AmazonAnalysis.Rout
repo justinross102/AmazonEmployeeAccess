@@ -1,0 +1,245 @@
+
+R version 4.3.1 (2023-06-16) -- "Beagle Scouts"
+Copyright (C) 2023 The R Foundation for Statistical Computing
+Platform: x86_64-pc-linux-gnu (64-bit)
+
+R is free software and comes with ABSOLUTELY NO WARRANTY.
+You are welcome to redistribute it under certain conditions.
+Type 'license()' or 'licence()' for distribution details.
+
+  Natural language support but running in an English locale
+
+R is a collaborative project with many contributors.
+Type 'contributors()' for more information and
+'citation()' on how to cite R or R packages in publications.
+
+Type 'demo()' for some demos, 'help()' for on-line help, or
+'help.start()' for an HTML browser interface to help.
+Type 'q()' to quit R.
+
+> ###################################
+> # Amazon Employee Access Analysis #
+> ###################################
+> 
+> # load libraries ----------------------------------------------------------
+> library(tidyverse)
+── Attaching core tidyverse packages ──────────────────────── tidyverse 2.0.0 ──
+✔ dplyr     1.1.3     ✔ readr     2.1.4
+✔ forcats   1.0.0     ✔ stringr   1.5.0
+✔ ggplot2   3.4.3     ✔ tibble    3.2.1
+✔ lubridate 1.9.3     ✔ tidyr     1.3.0
+✔ purrr     1.0.2     
+── Conflicts ────────────────────────────────────────── tidyverse_conflicts() ──
+✖ dplyr::filter() masks stats::filter()
+✖ dplyr::lag()    masks stats::lag()
+ℹ Use the conflicted package (<http://conflicted.r-lib.org/>) to force all conflicts to become errors
+> library(tidymodels)
+── Attaching packages ────────────────────────────────────── tidymodels 1.1.1 ──
+✔ broom        1.0.5     ✔ rsample      1.2.0
+✔ dials        1.2.0     ✔ tune         1.1.2
+✔ infer        1.0.5     ✔ workflows    1.1.3
+✔ modeldata    1.2.0     ✔ workflowsets 1.0.1
+✔ parsnip      1.1.1     ✔ yardstick    1.2.0
+✔ recipes      1.0.8     
+── Conflicts ───────────────────────────────────────── tidymodels_conflicts() ──
+✖ scales::discard() masks purrr::discard()
+✖ dplyr::filter()   masks stats::filter()
+✖ recipes::fixed()  masks stringr::fixed()
+✖ dplyr::lag()      masks stats::lag()
+✖ yardstick::spec() masks readr::spec()
+✖ recipes::step()   masks stats::step()
+• Learn how to get started at https://www.tidymodels.org/start/
+> library(vroom)
+
+Attaching package: ‘vroom’
+
+The following object is masked from ‘package:yardstick’:
+
+    spec
+
+The following object is masked from ‘package:scales’:
+
+    col_factor
+
+The following objects are masked from ‘package:readr’:
+
+    as.col_spec, col_character, col_date, col_datetime, col_double,
+    col_factor, col_guess, col_integer, col_logical, col_number,
+    col_skip, col_time, cols, cols_condense, cols_only, date_names,
+    date_names_lang, date_names_langs, default_locale, fwf_cols,
+    fwf_empty, fwf_positions, fwf_widths, locale, output_column,
+    problems, spec
+
+> library(embed) # for target encoding
+> library(ggmosaic)
+> 
+> # load in data ------------------------------------------------------------
+> train <- vroom("./train.csv") %>% 
++   mutate(ACTION = as.factor(ACTION))
+Rows: 32769 Columns: 10
+── Column specification ────────────────────────────────────────────────────────
+Delimiter: ","
+dbl (10): ACTION, RESOURCE, MGR_ID, ROLE_ROLLUP_1, ROLE_ROLLUP_2, ROLE_DEPTN...
+
+ℹ Use `spec()` to retrieve the full column specification for this data.
+ℹ Specify the column types or set `show_col_types = FALSE` to quiet this message.
+> 
+> test <- vroom("./test.csv") %>% 
++   select(-1)
+Rows: 58921 Columns: 10
+── Column specification ────────────────────────────────────────────────────────
+Delimiter: ","
+dbl (10): id, RESOURCE, MGR_ID, ROLE_ROLLUP_1, ROLE_ROLLUP_2, ROLE_DEPTNAME,...
+
+ℹ Use `spec()` to retrieve the full column specification for this data.
+ℹ Specify the column types or set `show_col_types = FALSE` to quiet this message.
+> 
+> # plots -------------------------------------------------------------------
+> 
+> # distribution of Action
+> train %>%
++   ggplot(mapping = aes(x = factor(ACTION))) + 
++   geom_bar() +
++   labs(title = 'Distribution of ACTION',
++        x = 'ACTION',
++        y = 'Count')
+> 
+> # Distribution of Action for the 15 Managers with most 0s
+> ACTION0_managers <- train %>%
++   filter(ACTION == 0) %>%
++   group_by(MGR_ID) %>%
++   summarise(count = n()) %>%
++   arrange(desc(count)) %>%
++   head(15) %>%
++   pull(MGR_ID)
+> 
+> subset_train <- train %>%
++   filter(MGR_ID %in% ACTION0_managers)
+> 
+> ggplot(subset_train, aes(x = factor(MGR_ID), fill = factor(ACTION))) +
++   geom_bar(position = 'dodge', stat = 'count') +
++   labs(title = 'Managerial Impact on Resource Approval',
++        x = 'Manager ID',
++        y = 'Count',
++        fill = 'Approval Result') +
++   scale_fill_manual(values = c("0" = "red", "1" = "green")) 
+> 
+> # recipe ------------------------------------------------------------------
+> 
+> my_recipe <- recipe(ACTION ~ ., data = train) %>%
++   step_mutate_at(all_numeric_predictors(), fn = factor) %>% # turn all numeric features into factors
++   step_other(all_nominal_predictors(), threshold = .01) %>%  # combines categorical values that occur <1% into an "other" value
++   step_dummy(all_nominal_predictors())  # dummy variable encoding
+>   
+> # apply the recipe to the data
+> prepped_recipe <- prep(my_recipe)
+> baked <- bake(prepped_recipe, new_data = train) # should have 112 columns
+> baked
+# A tibble: 32,769 × 112
+   ACTION RESOURCE_X4675 RESOURCE_X25993 RESOURCE_X75078 RESOURCE_X79092
+   <fct>           <dbl>           <dbl>           <dbl>           <dbl>
+ 1 1                   0               0               0               0
+ 2 1                   0               0               0               0
+ 3 1                   0               0               0               0
+ 4 1                   0               0               0               0
+ 5 1                   0               0               0               0
+ 6 0                   0               0               0               0
+ 7 1                   0               1               0               0
+ 8 1                   0               0               0               0
+ 9 1                   0               0               0               0
+10 1                   0               0               0               0
+# ℹ 32,759 more rows
+# ℹ 107 more variables: RESOURCE_other <dbl>, MGR_ID_other <dbl>,
+#   ROLE_ROLLUP_1_X117902 <dbl>, ROLE_ROLLUP_1_X117961 <dbl>,
+#   ROLE_ROLLUP_1_X118212 <dbl>, ROLE_ROLLUP_1_X118290 <dbl>,
+#   ROLE_ROLLUP_1_X118315 <dbl>, ROLE_ROLLUP_1_X118887 <dbl>,
+#   ROLE_ROLLUP_1_X119062 <dbl>, ROLE_ROLLUP_1_other <dbl>,
+#   ROLE_ROLLUP_2_X117962 <dbl>, ROLE_ROLLUP_2_X117969 <dbl>, …
+> 
+> # logistic regression ------------------------------------------------------
+> 
+> logistic_mod <- logistic_reg() %>% 
++   set_engine("glm")
+> 
+> logistic_workflow <- workflow() %>%
++   add_recipe(my_recipe) %>%
++   add_model(logistic_mod) %>%
++   fit(data = train) # Fit the workflow
+> 
+> amazon_predictions <- predict(logistic_workflow,
++                               new_data = test,
++                               type = "prob") # "class" or "prob"
+Warning message:
+In predict.lm(object, newdata, se.fit, scale = 1, type = if (type ==  :
+  prediction from rank-deficient fit; attr(*, "non-estim") has doubtful cases
+> 
+> kaggle_submission <- amazon_predictions %>%
++   mutate(Id = row_number()) %>% 
++   rename("Action" = ".pred_1") %>% 
++   select(3,2)
+> 
+> # write predictions to csv
+> vroom_write(x=kaggle_submission, file="./amazon_predictions.csv", delim=",")
+> # private - 0.70429
+> # public - 0.69688
+> 
+> # penalized logistic regression -------------------------------------------
+> 
+> penalized_logistic_mod <- logistic_reg(mixture = tune(),
++                                        penalty = tune()) %>% #Type of model
++   set_engine("glmnet")
+> 
+> target_encoding_recipe <- recipe(ACTION ~ ., train) %>%
++   step_mutate_at(all_numeric_predictors(), fn = factor) %>% # turn all numeric features into factors
++   step_other(all_nominal_predictors(), threshold = .001) %>%  # combines categorical values that occur <1% into an "other" value
++   step_lencode_mixed(all_nominal_predictors(), outcome = vars(ACTION)) # target encoding (must be 2-factor)
+> 
+> penalized_logistic_workflow <- workflow() %>%
++   add_recipe(target_encoding_recipe) %>%
++   add_model(penalized_logistic_mod)
+> 
+> ## Grid of values to tune over
+> pen_tuning_grid <- grid_regular(penalty(),
++                             mixture(),
++                             levels = 5) ## L^2 total tuning possibilities
+> 
+> ## Split data for CV15
+> pen_folds <- vfold_cv(train, v = 5, repeats = 1)
+> 
+> ## Run the CV
+> CV_results <- penalized_logistic_workflow %>%
++   tune_grid(resamples = pen_folds,
++             grid = pen_tuning_grid,
++             metrics = metric_set(roc_auc)) # f_meas, sens, recall, spec, precision, accuracy
+> 
+> ## Find Best Tuning Parameters
+> pen_bestTune <- CV_results %>%
++   select_best("roc_auc")
+> 
+> ## Finalize the Workflow & fit it
+> final_pen_wf <- penalized_logistic_workflow %>%
++   finalize_workflow(pen_bestTune) %>%
++   fit(data = train)
+> 
+> ## Predict
+> penalized_logistic_predictions <- final_pen_wf %>%
++   predict(new_data = test,
++           type = "prob")
+> 
+> pen_log_submission <- penalized_logistic_predictions %>%
++   mutate(Id = row_number()) %>% 
++   rename("Action" = ".pred_1") %>% 
++   select(3,2)
+> 
+> # write to csv
+> vroom_write(x=pen_log_submission, file="./penalized_logistic_predictions.csv", delim=",")
+> # private - 0.79076
+> # public - 0.7832
+> 
+> 
+> 
+> 
+> 
+> proc.time()
+   user  system elapsed 
+271.597   3.563 141.242 
