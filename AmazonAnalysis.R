@@ -38,7 +38,7 @@ ACTION0_managers <- train %>%
 subset_train <- train %>%
   filter(MGR_ID %in% ACTION0_managers)
 
-ggplot(subset_df, aes(x = factor(MGR_ID), fill = factor(ACTION))) +
+ggplot(subset_train, aes(x = factor(MGR_ID), fill = factor(ACTION))) +
   geom_bar(position = 'dodge', stat = 'count') +
   labs(title = 'Managerial Impact on Resource Approval',
        x = 'Manager ID',
@@ -102,7 +102,7 @@ pen_tuning_grid <- grid_regular(penalty(),
                             mixture(),
                             levels = 5) ## L^2 total tuning possibilities
 
-## Split data for CV15
+## Split data for CV
 pen_folds <- vfold_cv(train, v = 5, repeats = 1)
 
 ## Run the CV
@@ -134,6 +134,56 @@ pen_log_submission <- penalized_logistic_predictions %>%
 vroom_write(x=pen_log_submission, file="./penalized_logistic_predictions.csv", delim=",")
 # private - 0.79076
 # public - 0.7832
+
+
+# random forests ----------------------------------------------------------
+
+rand_forest_mod <- rand_forest(mtry = tune(),
+                      min_n=tune(),
+                      trees=500) %>% # or 1000
+  set_engine("ranger") %>%
+  set_mode("classification")
+
+rand_forest_workflow <- workflow() %>%
+  add_recipe(target_encoding_recipe) %>%
+  add_model(rand_forest_mod)
+
+rand_forest_tuning_grid <- grid_regular(mtry(range = c(1, (ncol(train)-1))),
+                                     min_n(),
+                                     levels = 5) ## L^2 total tuning possibilities
+
+## Split data for CV
+forest_folds <- vfold_cv(train, v = 5, repeats = 1)
+
+## Run the CV
+CV_results <- rand_forest_workflow %>%
+  tune_grid(resamples = forest_folds,
+            grid = rand_forest_tuning_grid,
+            metrics = metric_set(roc_auc)) # f_meas, sens, recall, spec, precision, accuracy
+
+## Find Best Tuning Parameters
+forest_bestTune <- CV_results %>%
+  select_best("roc_auc")
+
+## Finalize the Workflow & fit it
+final_forest_wf <- rand_forest_workflow %>%
+  finalize_workflow(forest_bestTune) %>%
+  fit(data = train)
+
+## Predict
+rand_forest_predictions <- final_forest_wf %>%
+  predict(new_data = test,
+          type = "prob")
+
+rand_forest_submission <- rand_forest_predictions %>%
+  mutate(Id = row_number()) %>% 
+  rename("Action" = ".pred_1") %>% 
+  select(3,2)
+
+# write to csv
+vroom_write(x=rand_forest_submission, file="./random_forest_predictions.csv", delim=",")
+# private - 0.85931
+# public - 0.86629
 
 
 
