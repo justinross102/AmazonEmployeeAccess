@@ -16,6 +16,21 @@ train <- vroom("./train.csv") %>%
 test <- vroom("./test.csv") %>% 
   select(-1)
 
+# functions to limit repeated code ----------------------------------------
+
+predict_and_format <- function(workflow, new_data, filename){
+  predictions <- workflow %>%
+    predict(new_data = new_data,
+            type = "prob")
+  
+  submission <- predictions %>%
+    mutate(Id = row_number()) %>% 
+    rename("Action" = ".pred_1") %>% 
+    select(3,2)
+  
+  vroom_write(x = submission, file = filename, delim=",")
+}
+
 # plots -------------------------------------------------------------------
 
 # distribution of Action
@@ -68,17 +83,7 @@ logistic_workflow <- workflow() %>%
   add_model(logistic_mod) %>%
   fit(data = train) # Fit the workflow
 
-amazon_predictions <- predict(logistic_workflow,
-                              new_data = test,
-                              type = "prob") # "class" or "prob"
-
-kaggle_submission <- amazon_predictions %>%
-  mutate(Id = row_number()) %>% 
-  rename("Action" = ".pred_1") %>% 
-  select(3,2)
-
-# write predictions to csv
-vroom_write(x=kaggle_submission, file="./amazon_predictions.csv", delim=",")
+predict_and_format(logistic_workflow, test, "./logistic_predictions.csv")
 # private - 0.70429
 # public - 0.69688
 
@@ -120,20 +125,9 @@ final_pen_wf <- penalized_logistic_workflow %>%
   finalize_workflow(pen_bestTune) %>%
   fit(data = train)
 
-## Predict
-penalized_logistic_predictions <- final_pen_wf %>%
-  predict(new_data = test,
-          type = "prob")
-
-pen_log_submission <- penalized_logistic_predictions %>%
-  mutate(Id = row_number()) %>% 
-  rename("Action" = ".pred_1") %>% 
-  select(3,2)
-
-# write to csv
-vroom_write(x=pen_log_submission, file="./penalized_logistic_predictions.csv", delim=",")
-# private - 0.79076
-# public - 0.7832
+predict_and_format(final_pen_wf, test, "./penalized_logistic_predictions.csv")
+# private - 0.79081
+# public - 0.78364
 
 
 # random forests ----------------------------------------------------------
@@ -170,20 +164,10 @@ final_forest_wf <- rand_forest_workflow %>%
   finalize_workflow(forest_bestTune) %>%
   fit(data = train)
 
-## Predict
-rand_forest_predictions <- final_forest_wf %>%
-  predict(new_data = test,
-          type = "prob")
+predict_and_format(final_forest_wf, test, "./random_forest_predictions.csv")
+# private - 0.86376
+# public - 0.87344
 
-rand_forest_submission <- rand_forest_predictions %>%
-  mutate(Id = row_number()) %>% 
-  rename("Action" = ".pred_1") %>% 
-  select(3,2)
-
-# write to csv
-vroom_write(x=rand_forest_submission, file="./random_forest_predictions.csv", delim=",")
-# private - 0.85931
-# public - 0.86629
 
 
 
