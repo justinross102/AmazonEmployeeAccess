@@ -7,7 +7,8 @@ library(tidyverse)
 library(tidymodels)
 library(vroom)
 library(embed) # for target encoding
-library(ggmosaic)
+library(discrim)
+library(naivebayes)
 
 # load in data ------------------------------------------------------------
 train <- vroom("./train.csv") %>% 
@@ -167,6 +168,86 @@ final_forest_wf <- rand_forest_workflow %>%
 predict_and_format(final_forest_wf, test, "./random_forest_predictions.csv")
 # private - 0.86376
 # public - 0.87344
+
+
+# naive bayes -------------------------------------------------------------
+
+naive_bayes_model <- naive_Bayes(Laplace = tune(),
+                                 smoothness = tune()) %>% 
+  set_mode("classification") %>% 
+  set_engine("naivebayes") # install discrim library
+
+
+naive_bayes_wf <- workflow() %>% 
+  add_recipe(target_encoding_recipe) %>% 
+  add_model(naive_bayes_model)
+
+# cross validation
+nb_tuning_grid <- grid_regular(Laplace(),
+                               smoothness(),
+                                levels = 5)
+
+## Split data for CV
+nb_folds <- vfold_cv(train, v = 5, repeats = 1)
+
+## Run the CV
+CV_results <- naive_bayes_wf %>%
+  tune_grid(resamples = nb_folds,
+            grid = nb_tuning_grid,
+            metrics = metric_set(roc_auc)) # f_meas, sens, recall, spec, precision, accuracy
+
+# find nest tuning parameters
+nb_bestTune <- CV_results %>%
+  select_best("roc_auc")
+
+# finalize workflow
+final_nb_wf <- naive_bayes_wf %>%
+  finalize_workflow(nb_bestTune) %>%
+  fit(data = train)
+
+predict_and_format(final_nb_wf, test, "./naive_bayes_predictions.csv")
+# private - 0.76438
+# public - 0.75864
+
+# k-nearest neighbors -----------------------------------------------------
+
+knn_model <- nearest_neighbor(neighbors=tune()) %>% # set or tune
+  set_mode("classification") %>%
+  set_engine("kknn")
+
+knn_recipe <- recipe(ACTION ~ ., train) %>%
+  step_mutate_at(all_numeric_predictors(), fn = factor) %>% # turn all numeric features into factors
+  step_other(all_nominal_predictors(), threshold = .001) %>%  # combines categorical values that occur <1% into an "other" value
+  step_lencode_mixed(all_nominal_predictors(), outcome = vars(ACTION)) %>%  # target encoding (must be 2-factor)
+  step_normalize(all_nominal_predictors())
+
+knn_workflow <- workflow() %>% 
+  add_recipe(knn_recipe) %>% 
+  add_model(knn_model)
+
+# cross validation
+knn_tuning_grid <- grid_regular(neighbors(),
+                               levels = 5)
+
+knn_folds <- vfold_cv(train, v = 5, repeats = 1)
+
+## Run the CV
+CV_results <- knn_workflow %>%
+  tune_grid(resamples = knn_folds,
+            grid = knn_tuning_grid,
+            metrics = metric_set(roc_auc))
+
+knn_bestTune <- CV_results %>%
+  select_best("roc_auc")
+
+# finalize workflow
+final_knn_wf <- knn_workflow %>%
+  finalize_workflow(knn_bestTune) %>%
+  fit(data = train)
+
+predict_and_format(final_knn_wf, test, "./knn_predictions.csv")
+# private -
+# public - 
 
 
 
