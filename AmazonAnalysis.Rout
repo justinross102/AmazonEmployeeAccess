@@ -48,7 +48,7 @@ Type 'q()' to quit R.
 ✖ dplyr::lag()      masks stats::lag()
 ✖ yardstick::spec() masks readr::spec()
 ✖ recipes::step()   masks stats::step()
-• Learn how to get started at https://www.tidymodels.org/start/
+• Dig deeper into tidy modeling with R at https://www.tmwr.org
 > library(vroom)
 
 Attaching package: ‘vroom’
@@ -71,7 +71,30 @@ The following objects are masked from ‘package:readr’:
     problems, spec
 
 > library(embed) # for target encoding
-> library(ggmosaic)
+> library(discrim)
+
+Attaching package: ‘discrim’
+
+The following object is masked from ‘package:dials’:
+
+    smoothness
+
+> library(naivebayes)
+naivebayes 0.9.7 loaded
+> library(doParallel)
+Loading required package: foreach
+
+Attaching package: ‘foreach’
+
+The following objects are masked from ‘package:purrr’:
+
+    accumulate, when
+
+Loading required package: iterators
+Loading required package: parallel
+> 
+> cl <- makePSOCKcluster(20)
+> registerDoParallel(cl)
 > 
 > # load in data ------------------------------------------------------------
 > train <- vroom("./train.csv") %>% 
@@ -93,6 +116,21 @@ dbl (10): id, RESOURCE, MGR_ID, ROLE_ROLLUP_1, ROLE_ROLLUP_2, ROLE_DEPTNAME,...
 
 ℹ Use `spec()` to retrieve the full column specification for this data.
 ℹ Specify the column types or set `show_col_types = FALSE` to quiet this message.
+> 
+> # functions to limit repeated code ----------------------------------------
+> 
+> predict_and_format <- function(workflow, new_data, filename){
++   predictions <- workflow %>%
++     predict(new_data = new_data,
++             type = "prob")
++   
++   submission <- predictions %>%
++     mutate(Id = row_number()) %>% 
++     rename("Action" = ".pred_1") %>% 
++     select(3,2)
++   
++   vroom_write(x = submission, file = filename, delim=",")
++ }
 > 
 > # plots -------------------------------------------------------------------
 > 
@@ -166,20 +204,10 @@ dbl (10): id, RESOURCE, MGR_ID, ROLE_ROLLUP_1, ROLE_ROLLUP_2, ROLE_DEPTNAME,...
 +   add_model(logistic_mod) %>%
 +   fit(data = train) # Fit the workflow
 > 
-> amazon_predictions <- predict(logistic_workflow,
-+                               new_data = test,
-+                               type = "prob") # "class" or "prob"
+> predict_and_format(logistic_workflow, test, "./logistic_predictions.csv")
 Warning message:
 In predict.lm(object, newdata, se.fit, scale = 1, type = if (type ==  :
   prediction from rank-deficient fit; attr(*, "non-estim") has doubtful cases
-> 
-> kaggle_submission <- amazon_predictions %>%
-+   mutate(Id = row_number()) %>% 
-+   rename("Action" = ".pred_1") %>% 
-+   select(3,2)
-> 
-> # write predictions to csv
-> vroom_write(x=kaggle_submission, file="./amazon_predictions.csv", delim=",")
 > # private - 0.70429
 > # public - 0.69688
 > 
@@ -203,7 +231,7 @@ In predict.lm(object, newdata, se.fit, scale = 1, type = if (type ==  :
 +                             mixture(),
 +                             levels = 5) ## L^2 total tuning possibilities
 > 
-> ## Split data for CV15
+> ## Split data for CV
 > pen_folds <- vfold_cv(train, v = 5, repeats = 1)
 > 
 > ## Run the CV
@@ -221,25 +249,134 @@ In predict.lm(object, newdata, se.fit, scale = 1, type = if (type ==  :
 +   finalize_workflow(pen_bestTune) %>%
 +   fit(data = train)
 > 
-> ## Predict
-> penalized_logistic_predictions <- final_pen_wf %>%
-+   predict(new_data = test,
-+           type = "prob")
+> predict_and_format(final_pen_wf, test, "./penalized_logistic_predictions.csv")
+> # private - 0.79081
+> # public - 0.78364
 > 
-> pen_log_submission <- penalized_logistic_predictions %>%
-+   mutate(Id = row_number()) %>% 
-+   rename("Action" = ".pred_1") %>% 
-+   select(3,2)
 > 
-> # write to csv
-> vroom_write(x=pen_log_submission, file="./penalized_logistic_predictions.csv", delim=",")
-> # private - 0.79076
-> # public - 0.7832
+> # random forests ----------------------------------------------------------
 > 
+> rand_forest_mod <- rand_forest(mtry = tune(),
++                       min_n=tune(),
++                       trees=500) %>% # or 1000
++   set_engine("ranger") %>%
++   set_mode("classification")
+> 
+> rand_forest_workflow <- workflow() %>%
++   add_recipe(target_encoding_recipe) %>%
++   add_model(rand_forest_mod)
+> 
+> rand_forest_tuning_grid <- grid_regular(mtry(range = c(1, (ncol(train)-1))),
++                                      min_n(),
++                                      levels = 5) ## L^2 total tuning possibilities
+> 
+> ## Split data for CV
+> forest_folds <- vfold_cv(train, v = 5, repeats = 1)
+> 
+> ## Run the CV
+> CV_results <- rand_forest_workflow %>%
++   tune_grid(resamples = forest_folds,
++             grid = rand_forest_tuning_grid,
++             metrics = metric_set(roc_auc)) # f_meas, sens, recall, spec, precision, accuracy
+> 
+> ## Find Best Tuning Parameters
+> forest_bestTune <- CV_results %>%
++   select_best("roc_auc")
+> 
+> ## Finalize the Workflow & fit it
+> final_forest_wf <- rand_forest_workflow %>%
++   finalize_workflow(forest_bestTune) %>%
++   fit(data = train)
+> 
+> predict_and_format(final_forest_wf, test, "./random_forest_predictions.csv")
+> # private - 0.86376
+> # public - 0.87344
+> 
+> 
+> # naive bayes -------------------------------------------------------------
+> 
+> naive_bayes_model <- naive_Bayes(Laplace = tune(),
++                                  smoothness = tune()) %>% 
++   set_mode("classification") %>% 
++   set_engine("naivebayes") # install discrim library
+> 
+> 
+> naive_bayes_wf <- workflow() %>% 
++   add_recipe(target_encoding_recipe) %>% 
++   add_model(naive_bayes_model)
+> 
+> # cross validation
+> nb_tuning_grid <- grid_regular(Laplace(),
++                                smoothness(),
++                                 levels = 5)
+> 
+> ## Split data for CV
+> nb_folds <- vfold_cv(train, v = 5, repeats = 1)
+> 
+> ## Run the CV
+> CV_results <- naive_bayes_wf %>%
++   tune_grid(resamples = nb_folds,
++             grid = nb_tuning_grid,
++             metrics = metric_set(roc_auc)) # f_meas, sens, recall, spec, precision, accuracy
+> 
+> # find nest tuning parameters
+> nb_bestTune <- CV_results %>%
++   select_best("roc_auc")
+> 
+> # finalize workflow
+> final_nb_wf <- naive_bayes_wf %>%
++   finalize_workflow(nb_bestTune) %>%
++   fit(data = train)
+> 
+> predict_and_format(final_nb_wf, test, "./naive_bayes_predictions.csv")
+> # private - 0.76438
+> # public - 0.75864
+> 
+> # k-nearest neighbors -----------------------------------------------------
+> 
+> knn_model <- nearest_neighbor(neighbors=tune()) %>% # set or tune
++   set_mode("classification") %>%
++   set_engine("kknn")
+> 
+> knn_recipe <- recipe(ACTION ~ ., train) %>%
++   step_mutate_at(all_numeric_predictors(), fn = factor) %>% # turn all numeric features into factors
++   step_other(all_nominal_predictors(), threshold = .001) %>%  # combines categorical values that occur <1% into an "other" value
++   step_lencode_mixed(all_nominal_predictors(), outcome = vars(ACTION)) %>%  # target encoding (must be 2-factor)
++   step_normalize(all_nominal_predictors())
+> 
+> knn_workflow <- workflow() %>% 
++   add_recipe(knn_recipe) %>% 
++   add_model(knn_model)
+> 
+> # cross validation
+> knn_tuning_grid <- grid_regular(neighbors(),
++                                levels = 5)
+> 
+> knn_folds <- vfold_cv(train, v = 5, repeats = 1)
+> 
+> ## Run the CV
+> CV_results <- knn_workflow %>%
++   tune_grid(resamples = knn_folds,
++             grid = knn_tuning_grid,
++             metrics = metric_set(roc_auc))
+> 
+> knn_bestTune <- CV_results %>%
++   select_best("roc_auc")
+> 
+> # finalize workflow
+> final_knn_wf <- knn_workflow %>%
++   finalize_workflow(knn_bestTune) %>%
++   fit(data = train)
+> 
+> predict_and_format(final_knn_wf, test, "./knn_predictions.csv")
+> # private -
+> # public - 
+> 
+> stopCluster(cl)
 > 
 > 
 > 
 > 
 > proc.time()
    user  system elapsed 
-271.597   3.563 141.242 
+291.915   4.948 595.720 

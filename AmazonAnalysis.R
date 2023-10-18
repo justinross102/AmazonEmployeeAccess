@@ -9,6 +9,10 @@ library(vroom)
 library(embed) # for target encoding
 library(discrim)
 library(naivebayes)
+library(doParallel)
+
+cl <- makePSOCKcluster(20)
+registerDoParallel(cl)
 
 # load in data ------------------------------------------------------------
 train <- vroom("./train.csv") %>% 
@@ -249,7 +253,7 @@ predict_and_format(final_knn_wf, test, "./knn_predictions.csv")
 # private -
 # public - 
 
-
+stopCluster(cl)
 
 
 
