@@ -11,8 +11,8 @@ library(discrim)
 library(naivebayes)
 library(doParallel)
 
-cl <- makePSOCKcluster(20)
-registerDoParallel(cl)
+#cl <- makePSOCKcluster(20)
+#registerDoParallel(cl)
 
 # load in data ------------------------------------------------------------
 train <- vroom("./train.csv") %>% 
@@ -98,9 +98,10 @@ penalized_logistic_mod <- logistic_reg(mixture = tune(),
                                        penalty = tune()) %>% #Type of model
   set_engine("glmnet")
 
+# because of the penalty, this regression can handle categories with only a few observations
+# so I removed the step_other()
 target_encoding_recipe <- recipe(ACTION ~ ., train) %>%
   step_mutate_at(all_numeric_predictors(), fn = factor) %>% # turn all numeric features into factors
-  step_other(all_nominal_predictors(), threshold = .001) %>%  # combines categorical values that occur <1% into an "other" value
   step_lencode_mixed(all_nominal_predictors(), outcome = vars(ACTION)) # target encoding (must be 2-factor)
 
 penalized_logistic_workflow <- workflow() %>%
@@ -131,8 +132,8 @@ final_pen_wf <- penalized_logistic_workflow %>%
   fit(data = train)
 
 predict_and_format(final_pen_wf, test, "./penalized_logistic_predictions.csv")
-# private - 0.79081
-# public - 0.78364
+# private - 0.85639
+# public - 0.86225
 
 
 # random forests ----------------------------------------------------------
@@ -142,6 +143,11 @@ rand_forest_mod <- rand_forest(mtry = tune(),
                       trees=500) %>% # or 1000
   set_engine("ranger") %>%
   set_mode("classification")
+
+target_encoding_recipe <- recipe(ACTION ~ ., train) %>%
+  step_mutate_at(all_numeric_predictors(), fn = factor) %>% # turn all numeric features into factors
+  step_other(all_nominal_predictors(), threshold = .001) %>%  # combines categorical values that occur <1% into an "other" value
+  step_lencode_mixed(all_nominal_predictors(), outcome = vars(ACTION)) # target encoding (must be 2-factor)
 
 rand_forest_workflow <- workflow() %>%
   add_recipe(target_encoding_recipe) %>%
@@ -250,10 +256,10 @@ final_knn_wf <- knn_workflow %>%
   fit(data = train)
 
 predict_and_format(final_knn_wf, test, "./knn_predictions.csv")
-# private -
-# public - 
+# private - 0.8142
+# public - 0.80905
 
-stopCluster(cl)
+#stopCluster(cl)
 
 
 
