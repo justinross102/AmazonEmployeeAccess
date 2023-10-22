@@ -10,6 +10,7 @@ library(embed) # for target encoding
 library(discrim)
 library(naivebayes)
 library(doParallel)
+library(kknn)
 
 #cl <- makePSOCKcluster(20)
 #registerDoParallel(cl)
@@ -258,6 +259,48 @@ final_knn_wf <- knn_workflow %>%
 predict_and_format(final_knn_wf, test, "./knn_predictions.csv")
 # private - 0.8142
 # public - 0.80905
+
+
+# principal component dim reduction ---------------------------------------
+
+pcdr_recipe <- recipe(ACTION ~ ., data = train) %>%
+  step_mutate_at(all_numeric_predictors(), fn = factor) %>% # turn all numeric features into factors
+  step_dummy(all_nominal_predictors()) %>%
+  step_normalize(all_predictors()) %>%
+  step_pca(all_predictors(), threshold = .8) #Threshold is between 0 and 1
+
+knn_model2 <- nearest_neighbor(neighbors=tune()) %>% # set or tune
+  set_mode("classification") %>%
+  set_engine("kknn")
+
+knn_workflow2 <- workflow() %>% 
+  add_recipe(pcdr_recipe) %>% 
+  add_model(knn_model2)
+
+knn_tuning_grid2 <- grid_regular(neighbors(),
+                                levels = 5)
+
+knn_folds2 <- vfold_cv(train, v = 5, repeats = 1)
+
+## Run the CV
+CV_results <- knn_workflow2 %>%
+  tune_grid(resamples = knn_folds2,
+            grid = knn_tuning_grid2,
+            metrics = metric_set(roc_auc))
+
+knn_bestTune2 <- CV_results %>%
+  select_best("roc_auc")
+
+# finalize workflow
+final_knn_wf2 <- knn_workflow %>%
+  finalize_workflow(knn_bestTune) %>%
+  fit(data = train)
+
+predict_and_format(final_knn_wf, test, "./knn_predictions_pcdr.csv")
+# private - 0.8142
+# public - 0.80905
+
+
 
 #stopCluster(cl)
 
