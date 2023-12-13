@@ -298,12 +298,12 @@ predict_and_format(final_knn_wf, test, "./knn_predictions.csv")
 
 # principal component dim reduction ---------------------------------------
 
-# pcdr_recipe <- recipe(ACTION ~ ., train) %>%
-#   step_mutate_at(all_numeric_predictors(), fn = factor) %>% # turn all numeric features into factors
-#   step_other(all_nominal_predictors(), threshold = .001) %>%  # combines categorical values that occur <1% into an "other" value
-#   step_lencode_mixed(all_nominal_predictors(), outcome = vars(ACTION)) %>%  # target encoding (must be 2-factor)
-#   step_normalize(all_nominal_predictors()) %>% 
-#   step_pca(all_predictors(), threshold = .9) #Threshold is between 0 and 1
+pcdr_recipe <- recipe(ACTION ~ ., train) %>%
+  step_mutate_at(all_numeric_predictors(), fn = factor) %>% # turn all numeric features into factors
+  step_other(all_nominal_predictors(), threshold = .001) %>%  # combines categorical values that occur <1% into an "other" value
+  step_lencode_mixed(all_nominal_predictors(), outcome = vars(ACTION)) %>%  # target encoding (must be 2-factor)
+  step_normalize(all_nominal_predictors()) %>%
+  step_pca(all_predictors(), threshold = .9) #Threshold is between 0 and 1
 #   
 # naive bayes
 # private - 0.77292
@@ -322,9 +322,9 @@ predict_and_format(final_knn_wf, test, "./knn_predictions.csv")
 #   set_mode("classification") %>%
 #   set_engine("kernlab")
 # 
-# svmRadial <- svm_rbf(rbf_sigma=tune(), cost=tune()) %>% # set or tune
-#   set_mode("classification") %>%
-#   set_engine("kernlab")
+svmRadial <- svm_rbf(rbf_sigma=tune(), cost=tune()) %>% # set or tune
+  set_mode("classification") %>%
+  set_engine("kernlab")
 # 
 # svmLinear <- svm_linear(cost=tune()) %>% # set or tune
 #   set_mode("classification") %>%
@@ -332,30 +332,30 @@ predict_and_format(final_knn_wf, test, "./knn_predictions.csv")
 # 
 # ## Fit or Tune Model HERE
 # 
-# svm_wf <- workflow() %>% 
-#   add_model(svmRadial) %>% 
-#   add_recipe(pcdr_recipe)
+svm_wf <- workflow() %>%
+  add_model(svmRadial) %>%
+  add_recipe(pcdr_recipe)
 # 
 # # cross validation
-# svm_tuning_grid <- grid_regular(cost(),
-#                                 degree(),
-#                                 levels = 5)
+svm_tuning_grid <- grid_regular(cost(),
+                                degree(),
+                                levels = 5)
 # 
 # svm_folds <- vfold_cv(train, v = 5, repeats = 1)
 # 
 # ## Run the CV
-# CV_results <- svm_wf %>%
-#   tune_grid(resamples = svm_folds,
-#             grid = svm_tuning_grid,
-#             metrics = metric_set(roc_auc))
+CV_results <- svm_wf %>%
+  tune_grid(resamples = svm_folds,
+            grid = svm_tuning_grid,
+            metrics = metric_set(roc_auc))
 # 
-# svm_bestTune <- CV_results %>%
-#   select_best("roc_auc")
+svm_bestTune <- CV_results %>%
+  select_best("roc_auc")
 # 
 # # finalize workflow
-# final_svm_wf <- svm_wf %>%
-#   finalize_workflow(svm_bestTune) %>%
-#   fit(data = train)
+final_svm_wf <- svm_wf %>%
+  finalize_workflow(svm_bestTune) %>%
+  fit(data = train)
 # 
 # predict_and_format(final_svm_wf, test, "./svmLinear_predictions.csv")
 
